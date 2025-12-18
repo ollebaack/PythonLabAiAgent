@@ -97,47 +97,79 @@ class Agent:
             # Prepare tools schema
             tools_schema = [tool.to_schema() for tool in self.tools.values()] if self.tools else None
             
-            # Call Ollama
-            try:
-                response = self._call_ollama(messages, tools_schema)
-                
-                # Check if response contains tool calls
-                if response.get("message", {}).get("tool_calls"):
-                    # Add assistant message with tool calls to memory
-                    self.memory.append(response["message"])
+            # Call Ollama with retry logic
+            max_retries = 2
+            for attempt in range(max_retries):
+                try:
+                    response = self._call_ollama(messages, tools_schema)
                     
-                    # Execute each tool call
-                    for tool_call in response["message"]["tool_calls"]:
-                        tool_name = tool_call["function"]["name"]
-                        tool_args = tool_call["function"]["arguments"]
+                    # Check if response contains tool calls
+                    if response.get("message", {}).get("tool_calls"):
+                        # Add assistant message with tool calls to memory
+                        self.memory.append(response["message"])
                         
-                        print(f"[{self.name}] Calling tool: {tool_name} with args: {tool_args}")
+                        # Execute each tool call
+                        for tool_call in response["message"]["tool_calls"]:
+                            tool_name = tool_call["function"]["name"]
+                            tool_args = tool_call["function"]["arguments"]
+                            
+                            print(f"[{self.name}] Calling tool: {tool_name} with args: {tool_args}")
+                            
+                            if tool_name in self.tools:
+                                result = self.tools[tool_name].execute(**tool_args)
+                            else:
+                                result = f"Error: Tool {tool_name} not found"
+                            
+                            # Add tool result to memory
+                            self.memory.append({
+                                "role": "tool",
+                                "content": result
+                            })
                         
-                        if tool_name in self.tools:
-                            result = self.tools[tool_name].execute(**tool_args)
-                        else:
-                            result = f"Error: Tool {tool_name} not found"
+                        # Continue loop to let agent process tool results
+                        break  # Break retry loop, continue main loop
+                    else:
+                        # No tool calls, we have final response
+                        assistant_message = response["message"]["content"]
                         
-                        # Add tool result to memory
-                        self.memory.append({
-                            "role": "tool",
-                            "content": result
-                        })
-                    
-                    # Continue loop to let agent process tool results
-                    continue
-                else:
-                    # No tool calls, we have final response
-                    assistant_message = response["message"]["content"]
-                    self.memory.append({"role": "assistant", "content": assistant_message})
-                    return assistant_message
-                    
-            except Exception as e:
-                error_msg = f"Error calling LLM: {str(e)}"
-                print(f"[{self.name}] {error_msg}")
-                return error_msg
+                        # Validate response is not hallucinated JSON
+                        if self._is_hallucinated_response(assistant_message):
+                            print(f"[{self.name}] Detected hallucinated response, retrying...")
+                            if attempt < max_retries - 1:
+                                # Add correction message
+                                self.memory.append({
+                                    "role": "system",
+                                    "content": "You MUST respond in natural language to the user. Do NOT output JSON or tool calls as text. Based on the tool results you received, provide a clear answer to the user's question."
+                                })
+                                continue  # Retry
+                            else:
+                                # Last attempt failed, return error
+                                return "I apologize, but I'm having trouble generating a proper response. Please try rephrasing your question."
+                        
+                        self.memory.append({"role": "assistant", "content": assistant_message})
+                        return assistant_message
+                        
+                except Exception as e:
+                    error_msg = f"Error calling LLM: {str(e)}"
+                    print(f"[{self.name}] {error_msg}")
+                    if attempt < max_retries - 1:
+                        continue  # Retry
+                    return error_msg
         
         return "Max iterations reached without final answer."
+    
+    def _is_hallucinated_response(self, response: str) -> bool:
+        """Detect if the response is a hallucinated JSON/tool call instead of natural language."""
+        response = response.strip()
+        # Check for common hallucination patterns
+        hallucination_indicators = [
+            response.startswith('{"name":'),
+            response.startswith('{"parameters":'),
+            'call_search_agent' in response and '{' in response,
+            'call_playback_agent' in response and '{' in response,
+            'call_playlist_agent' in response and '{' in response,
+        ]
+        return any(hallucination_indicators)
     
     def _call_ollama(self, messages: List[Dict], tools: Optional[List[Dict]] = None) -> Dict:
         """Call Ollama API with OpenAI-compatible format."""
@@ -628,15 +660,21 @@ def main():
     # Create specialized agents
     search_agent = Agent(
         name="Spotify Search Agent",
-        system_prompt="You are a Spotify search specialist. Help users find tracks, artists, and get recommendations. Use the available tools to search Spotify and provide detailed information."
+        system_prompt="""You are a Spotify search specialist. Help users find tracks, artists, and get recommendations.
+        
+IMPORTANT: After using tools to search, you MUST provide a natural language response summarizing the results. Never output JSON or tool syntax as your final response."""
     )
     
     for tool in spotify_tools:
         search_agent.add_tool(tool)
     
+    # Search Agent will get access to Playback Agent after it's created
+    
     playlist_agent = Agent(
         name="Playlist Agent",
-        system_prompt="You are a Spotify playlist specialist. Help users explore playlists and discover music collections. Use the available tools to get playlist information."
+        system_prompt="""You are a Spotify playlist specialist. Help users explore playlists and discover music collections.
+        
+IMPORTANT: After getting playlist information, you MUST provide a natural language response summarizing the playlist. Never output JSON or tool syntax as your final response."""
     )
     
     # Add playlist-specific tool
@@ -651,11 +689,26 @@ def main():
         
         playback_agent = Agent(
             name="Playback Agent",
-            system_prompt="You are a Spotify playback control specialist. Help users play songs, control playback (pause, resume, skip), adjust volume, and check what's currently playing. Use the available tools to control Spotify playback."
+            system_prompt="""You are a Spotify playback control specialist. Help users play songs, control playback (pause, resume, skip), adjust volume, and check what's currently playing.
+            
+IMPORTANT:
+1. When asked 'what' is playing, use get_current_playback and respond with the artist and track name in natural language.
+2. If asked to play a specific song/artist but you don't have a track URI, call the Search Agent first to find it, then use the URI to play it.
+3. After performing actions or getting playback info, you MUST respond in natural language.
+4. Never output JSON or tool syntax as your final response.
+5. If an error occurs, explain it simply to the user.
+
+You have access to the Search Agent to find tracks when needed."""
         )
         
         for tool in playback_tools:
             playback_agent.add_tool(tool)
+        
+        # Give Playback Agent access to Search Agent
+        playback_agent.add_tool(Tool.from_agent(search_agent))
+        
+        # Enable agent collaboration: Search Agent can call Playback Agent if needed
+        search_agent.add_tool(Tool.from_agent(playback_agent))
         
         print("✅ Playback client initialized!")
     except Exception as e:
@@ -665,7 +718,22 @@ def main():
     # Create coordinator agent that can delegate to specialized agents
     coordinator = Agent(
         name="Coordinator Agent",
-        system_prompt="You are a coordinator that helps users with Spotify-related tasks. You can delegate tasks to specialized agents: Search Agent (for finding tracks, artists, recommendations), Playlist Agent (for playlist information), and Playback Agent (for playing/controlling music). Decide which agent to use based on the user's request. Prioritize using the search agent for most tasks, if the user haven't directly asked for playlist or playback operations."
+        system_prompt="""You are a coordinator that helps users with Spotify-related tasks in Swedish or English.
+        
+IMPORTANT RULES:
+1. When you receive tool results, you MUST respond to the user in natural language (Swedish if user speaks Swedish).
+2. NEVER output JSON or tool call syntax as your response. Tool calls are internal only.
+3. After calling tools and getting results, always provide a clear answer based on those results.
+4. If the user asks "Vem är det jag lyssnar på nu?" (Who am I listening to now?) or similar, call Playback Agent with task='what'.
+5. If user asks to play a song ("spela", "play"), delegate to Playback Agent with task='play <song/artist name>'.
+6. The Playback Agent can search for tracks itself - just pass it the task.
+
+Available agents:
+- Playback Agent: Play songs, control playback (pause, resume, skip, volume), check what's playing. Can search for tracks.
+- Search Agent: Find tracks, artists, get recommendations
+- Playlist Agent: Get playlist information
+
+Respond naturally and conversationally. Extract information from tool results and present it clearly to the user."""
     )
     
     # Register specialized agents as tools

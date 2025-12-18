@@ -722,7 +722,7 @@ You have access to the Search Agent to find tracks when needed."""
         
 IMPORTANT RULES:
 1. You CAN perform multiple actions in sequence. Break down complex requests into steps.
-2. When you receive tool results, you MUST respond to the user in natural language (Swedish if user speaks Swedish).
+2. When you receive tool results, you MUST respond to the user in natural language.
 3. NEVER output JSON or tool call syntax as your response. Tool calls are internal only.
 4. After calling all needed tools and getting results, provide a clear final answer based on those results.
 5. If the user asks "Vem är det jag lyssnar på nu?" (Who am I listening to now?) or similar, call Playback Agent with task='what'.

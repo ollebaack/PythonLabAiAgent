@@ -10,7 +10,7 @@ import requests
 from typing import List, Dict, Any, Callable, Optional
 from dotenv import load_dotenv
 import spotipy
-from spotipy.oauth2 import SpotifyClientCredentials
+from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
 
 
 # ==================== Core Classes ====================
@@ -240,6 +240,126 @@ class SpotifyClient:
         }
 
 
+class SpotifyPlaybackClient:
+    """Wrapper for Spotify Playback API using OAuth (requires user authorization)."""
+    
+    def __init__(self):
+        load_dotenv()
+        client_id = os.getenv("SPOTIFY_CLIENT_ID")
+        client_secret = os.getenv("SPOTIFY_CLIENT_SECRET")
+        redirect_uri = os.getenv("SPOTIFY_REDIRECT_URI", "https://127.0.0.1:8888/callback")
+        
+        if not client_id or not client_secret:
+            raise ValueError("SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET must be set in .env file")
+        
+        # Required scopes for playback control
+        scope = "user-modify-playback-state user-read-playback-state user-read-currently-playing"
+        
+        auth_manager = SpotifyOAuth(
+            client_id=client_id,
+            client_secret=client_secret,
+            redirect_uri=redirect_uri,
+            scope=scope,
+            cache_path=".spotify_cache"
+        )
+        self.client = spotipy.Spotify(auth_manager=auth_manager)
+    
+    def play_track(self, track_uri: str, device_id: Optional[str] = None) -> Dict:
+        """Play a specific track by URI."""
+        try:
+            self.client.start_playback(device_id=device_id, uris=[track_uri])
+            return {"status": "success", "message": f"Playing track: {track_uri}"}
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+    
+    def play_tracks(self, track_uris: List[str], device_id: Optional[str] = None) -> Dict:
+        """Play multiple tracks by URIs."""
+        try:
+            self.client.start_playback(device_id=device_id, uris=track_uris)
+            return {"status": "success", "message": f"Playing {len(track_uris)} tracks"}
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+    
+    def pause_playback(self, device_id: Optional[str] = None) -> Dict:
+        """Pause current playback."""
+        try:
+            self.client.pause_playback(device_id=device_id)
+            return {"status": "success", "message": "Playback paused"}
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+    
+    def resume_playback(self, device_id: Optional[str] = None) -> Dict:
+        """Resume current playback."""
+        try:
+            self.client.start_playback(device_id=device_id)
+            return {"status": "success", "message": "Playback resumed"}
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+    
+    def skip_to_next(self, device_id: Optional[str] = None) -> Dict:
+        """Skip to next track."""
+        try:
+            self.client.next_track(device_id=device_id)
+            return {"status": "success", "message": "Skipped to next track"}
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+    
+    def skip_to_previous(self, device_id: Optional[str] = None) -> Dict:
+        """Skip to previous track."""
+        try:
+            self.client.previous_track(device_id=device_id)
+            return {"status": "success", "message": "Skipped to previous track"}
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+    
+    def set_volume(self, volume_percent: int, device_id: Optional[str] = None) -> Dict:
+        """Set playback volume (0-100)."""
+        try:
+            volume_percent = max(0, min(100, volume_percent))  # Clamp to 0-100
+            self.client.volume(volume_percent, device_id=device_id)
+            return {"status": "success", "message": f"Volume set to {volume_percent}%"}
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+    
+    def get_current_playback(self) -> Dict:
+        """Get information about current playback."""
+        try:
+            playback = self.client.current_playback()
+            if not playback:
+                return {"status": "no_playback", "message": "No active playback"}
+            
+            track = playback.get('item', {})
+            return {
+                "status": "playing" if playback['is_playing'] else "paused",
+                "track_name": track.get('name', 'Unknown'),
+                "artist": track.get('artists', [{}])[0].get('name', 'Unknown'),
+                "album": track.get('album', {}).get('name', 'Unknown'),
+                "progress_ms": playback.get('progress_ms', 0),
+                "duration_ms": track.get('duration_ms', 0),
+                "volume_percent": playback.get('device', {}).get('volume_percent', 0),
+                "device_name": playback.get('device', {}).get('name', 'Unknown')
+            }
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+    
+    def get_available_devices(self) -> Dict:
+        """Get list of available playback devices."""
+        try:
+            devices = self.client.devices()
+            device_list = []
+            for device in devices.get('devices', []):
+                device_list.append({
+                    'id': device['id'],
+                    'name': device['name'],
+                    'type': device['type'],
+                    'is_active': device['is_active'],
+                    'volume_percent': device['volume_percent']
+                })
+            return {"status": "success", "devices": device_list}
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
+
 # ==================== Spotify Tool Functions ====================
 
 def create_spotify_tools(spotify_client: SpotifyClient) -> List[Tool]:
@@ -339,6 +459,117 @@ def create_spotify_tools(spotify_client: SpotifyClient) -> List[Tool]:
     return tools
 
 
+def create_playback_tools(playback_client: SpotifyPlaybackClient) -> List[Tool]:
+    """Create Spotify playback control tools."""
+    
+    tools = [
+        Tool(
+            name="play_track",
+            description="Play a specific track by Spotify URI (e.g., spotify:track:xxxxx)",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "track_uri": {
+                        "type": "string",
+                        "description": "Spotify track URI to play"
+                    }
+                },
+                "required": ["track_uri"]
+            },
+            function=lambda track_uri: json.dumps(playback_client.play_track(track_uri), indent=2)
+        ),
+        Tool(
+            name="play_multiple_tracks",
+            description="Play multiple tracks by Spotify URIs",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "track_uris": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of Spotify track URIs to play"
+                    }
+                },
+                "required": ["track_uris"]
+            },
+            function=lambda track_uris: json.dumps(playback_client.play_tracks(track_uris), indent=2)
+        ),
+        Tool(
+            name="pause_playback",
+            description="Pause the current playback",
+            parameters={
+                "type": "object",
+                "properties": {}
+            },
+            function=lambda: json.dumps(playback_client.pause_playback(), indent=2)
+        ),
+        Tool(
+            name="resume_playback",
+            description="Resume the current playback",
+            parameters={
+                "type": "object",
+                "properties": {}
+            },
+            function=lambda: json.dumps(playback_client.resume_playback(), indent=2)
+        ),
+        Tool(
+            name="skip_to_next",
+            description="Skip to the next track",
+            parameters={
+                "type": "object",
+                "properties": {}
+            },
+            function=lambda: json.dumps(playback_client.skip_to_next(), indent=2)
+        ),
+        Tool(
+            name="skip_to_previous",
+            description="Skip to the previous track",
+            parameters={
+                "type": "object",
+                "properties": {}
+            },
+            function=lambda: json.dumps(playback_client.skip_to_previous(), indent=2)
+        ),
+        Tool(
+            name="set_volume",
+            description="Set the playback volume (0-100)",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "volume_percent": {
+                        "type": "integer",
+                        "description": "Volume level from 0 to 100",
+                        "minimum": 0,
+                        "maximum": 100
+                    }
+                },
+                "required": ["volume_percent"]
+            },
+            function=lambda volume_percent: json.dumps(playback_client.set_volume(volume_percent), indent=2)
+        ),
+        Tool(
+            name="get_current_playback",
+            description="Get information about what's currently playing",
+            parameters={
+                "type": "object",
+                "properties": {}
+            },
+            function=lambda: json.dumps(playback_client.get_current_playback(), indent=2)
+        ),
+        Tool(
+            name="get_available_devices",
+            description="Get list of available Spotify devices for playback",
+            parameters={
+                "type": "object",
+                "properties": {}
+            },
+            function=lambda: json.dumps(playback_client.get_available_devices(), indent=2)
+        )
+    ]
+    
+    return tools
+
+
 # ==================== Setup Validation ====================
 
 def check_ollama_connection(model: str = "llama3.2") -> bool:
@@ -411,19 +642,44 @@ def main():
     # Add playlist-specific tool
     playlist_agent.add_tool(spotify_tools[4])  # get_playlist tool
     
+    # Initialize playback client and create playback agent
+    playback_agent = None
+    try:
+        print("\n🔍 Initializing Spotify playback (requires authorization)...")
+        playback_client = SpotifyPlaybackClient()
+        playback_tools = create_playback_tools(playback_client)
+        
+        playback_agent = Agent(
+            name="Playback Agent",
+            system_prompt="You are a Spotify playback control specialist. Help users play songs, control playback (pause, resume, skip), adjust volume, and check what's currently playing. Use the available tools to control Spotify playback."
+        )
+        
+        for tool in playback_tools:
+            playback_agent.add_tool(tool)
+        
+        print("✅ Playback client initialized!")
+    except Exception as e:
+        print(f"⚠️  Playback features disabled: {str(e)}")
+        print("   (Playback requires user authorization. Search features still work!)")
+    
     # Create coordinator agent that can delegate to specialized agents
     coordinator = Agent(
         name="Coordinator Agent",
-        system_prompt="You are a coordinator that helps users with Spotify-related tasks. You can delegate tasks to specialized agents: Search Agent (for finding tracks, artists, recommendations) and Playlist Agent (for playlist information). Decide which agent to use based on the user's request, or handle simple queries directly."
+        system_prompt="You are a coordinator that helps users with Spotify-related tasks. You can delegate tasks to specialized agents: Search Agent (for finding tracks, artists, recommendations), Playlist Agent (for playlist information), and Playback Agent (for playing/controlling music). Decide which agent to use based on the user's request. Prioritize using the search agent for most tasks, if the user haven't directly asked for playlist or playback operations."
     )
     
     # Register specialized agents as tools
     coordinator.add_tool(Tool.from_agent(search_agent))
     coordinator.add_tool(Tool.from_agent(playlist_agent))
+    if playback_agent:
+        coordinator.add_tool(Tool.from_agent(playback_agent))
     
     print("\n✅ Agents initialized!")
     print("\n💡 Available commands:")
     print("  - Ask about Spotify tracks, artists, or playlists")
+    if playback_agent:
+        print("  - Play songs, pause, skip, control volume")
+        print("  - Check what's currently playing")
     print("  - Type 'quit' or 'exit' to stop")
     print("=" * 60)
     

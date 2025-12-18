@@ -77,7 +77,8 @@ ollama pull llama3.2
 2. Log in with your Spotify account
 3. Click "Create App"
 4. Fill in app name and description
-5. Copy your **Client ID** and **Client Secret**
+5. **Important for Playback**: Click "Edit Settings" and add `https://127.0.0.1:8888/callback` to "Redirect URIs"
+6. Copy your **Client ID** and **Client Secret**
 
 ### 3. Install Python Dependencies
 
@@ -98,7 +99,10 @@ pip install requests python-dotenv spotipy
    ```
    SPOTIFY_CLIENT_ID=your_actual_client_id
    SPOTIFY_CLIENT_SECRET=your_actual_client_secret
+   SPOTIFY_REDIRECT_URI=https://127.0.0.1:8888/callback
    ```
+   
+   **Note**: For playback features, the first run will open a browser for authorization. After authorizing, you'll be redirected to a 127.0.0.1 URL - just copy that full URL and paste it back in the terminal.
 
 4. **Ensure Ollama is running:**
    - Ollama usually starts automatically after installation
@@ -114,11 +118,20 @@ python agent.py
 
 ### Example Queries
 
+**Search & Discovery:**
 - "Search for Bohemian Rhapsody"
 - "Tell me about Taylor Swift as an artist"
 - "Find tracks similar to Spotify track ID: 3n3Ppam7vgaVa1iaRUc9Lp"
 - "Get the playlist 37i9dQZF1DXcBWIGoYBM5M" (Spotify playlist ID)
 - "Recommend songs based on track ID: 11dFghVXANMlKmJXsNCbNl"
+
+**Playback Control (requires authorization):**
+- "Play Bohemian Rhapsody by Queen"
+- "What's currently playing?"
+- "Pause the music"
+- "Skip to the next track"
+- "Set volume to 50"
+- "Resume playback"
 
 ### Commands
 

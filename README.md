@@ -21,6 +21,47 @@ A Python-based agent orchestration system where agents have individual memory, c
 
 ### 1. Install Ollama
 
+#### Option A: Docker (Recommended)
+
+**Prerequisites:**
+- Docker Desktop installed ([download here](https://www.docker.com/products/docker-desktop))
+
+**Setup (Windows PowerShell):**
+```powershell
+.\setup-ollama.ps1
+```
+
+**Setup (macOS/Linux):**
+```bash
+chmod +x setup-ollama.sh
+./setup-ollama.sh
+```
+
+**Manual Docker Setup:**
+```bash
+# Start Ollama container
+docker-compose up -d
+
+# Pull the model
+docker exec ollama ollama pull llama3.2
+
+# Verify it's running
+docker logs ollama -f
+```
+
+**Useful Docker commands:**
+- View logs: `docker logs ollama -f`
+- Stop container: `docker-compose down`
+- List models: `docker exec ollama ollama list`
+- Pull other models: `docker exec ollama ollama pull llama3.1`
+
+Other recommended models:
+- `llama3.1` (larger, more capable)
+- `mistral` (fast alternative)
+- `phi3` (lightweight)
+
+#### Option B: Native Installation
+
 **Windows/macOS/Linux:**
 - Download from [https://ollama.ai](https://ollama.ai)
 - Install and start Ollama
@@ -29,11 +70,6 @@ A Python-based agent orchestration system where agents have individual memory, c
 ```bash
 ollama pull llama3.2
 ```
-
-Other recommended models:
-- `ollama pull llama3.1` (larger, more capable)
-- `ollama pull mistral` (fast alternative)
-- `ollama pull phi3` (lightweight)
 
 ### 2. Get Spotify API Credentials
 

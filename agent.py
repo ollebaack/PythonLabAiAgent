@@ -91,7 +91,7 @@ class Agent:
         while iteration < max_iterations:
             iteration += 1
             
-            # Prepare messages for LLM
+            # Prepare messages for LLM. TODO: self.memory shouldn't be system prompt
             messages = [{"role": "system", "content": self.system_prompt}] + self.memory
             
             # Prepare tools schema
@@ -344,6 +344,7 @@ def create_spotify_tools(spotify_client: SpotifyClient) -> List[Tool]:
 def check_ollama_connection(model: str = "llama3.2") -> bool:
     """Check if Ollama is running and model is available."""
     try:
+        print("   (This may take 10-30 seconds on first run while model loads...)")
         response = requests.post(
             "http://localhost:11434/api/chat",
             json={
@@ -351,7 +352,7 @@ def check_ollama_connection(model: str = "llama3.2") -> bool:
                 "messages": [{"role": "user", "content": "test"}],
                 "stream": False
             },
-            timeout=5
+            timeout=60  # Increased timeout for initial model load
         )
         return response.status_code == 200
     except Exception as e:
@@ -450,5 +451,11 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        print(f"\n❌ Fatal Error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        input("\nPress Enter to exit...")  # Keep terminal open to see error
 

@@ -2,3 +2,8 @@ requests
 python-dotenv
 spotipy
 boto3
+fastapi
+uvicorn[standard]
+redis
+websockets
+python-multipart

@@ -1,21 +1,32 @@
 # Spotify Agent Orchestrator
 
-A Python-based agent orchestration system where agents have individual memory, can use tools, and can call each other as tools. Agents are specialized for interacting with the Spotify API.
+A Python-based agent orchestration system where agents have individual memory, can use tools, and can call each other as tools. Agents are specialized for interacting with the Spotify API. Includes a **FastAPI backend** and **React Next.js chatbot frontend** with shadcn/ui components.
 
 ## Features
 
 - 🤖 **Agent Orchestration**: Multiple specialized agents that can delegate tasks to each other
-- 🧠 **Memory**: Each agent maintains conversation history
+- 🧠 **Memory**: Each agent maintains conversation history (Redis-backed sessions)
 - 🔧 **Tools**: Extensible tool system with OpenAI function calling format
 - 🎵 **Spotify Integration**: Search tracks, get artist info, playlists, and recommendations
 - ☁️ **AWS Bedrock**: Uses Amazon Bedrock with Claude for powerful LLM inference
+- 🌐 **Web Interface**: Modern chatbot UI built with Next.js, TypeScript, Tailwind CSS, and shadcn/ui
+- 🐳 **Dockerized**: FastAPI backend and Redis run in Docker containers
 
 ## Architecture
 
+### Backend
 - **Coordinator Agent**: Routes tasks to specialized agents
 - **Search Agent**: Handles track/artist search and recommendations
 - **Playlist Agent**: Manages playlist queries
-- **Agent-as-Tool**: Agents can call other agents as tools
+- **Playback Agent**: Controls Spotify playback (single-user mode)
+- **FastAPI**: REST and WebSocket endpoints for real-time chat
+- **Redis**: Session storage for conversation history
+
+### Frontend
+- **Next.js 14+**: React with App Router and TypeScript
+- **shadcn/ui**: Beautiful, accessible UI components
+- **Tailwind CSS**: Utility-first styling
+- **WebSocket**: Real-time communication with agent
 
 ## Prerequisites
 
@@ -88,48 +99,98 @@ A Python-based agent orchestration system where agents have individual memory, c
 5. **Important for Playback**: Click "Edit Settings" and add `https://127.0.0.1:8888/callback` to "Redirect URIs"
 6. Copy your **Client ID** and **Client Secret**
 
-### 3. Install Python Dependencies
+### 3. Install Dependencies
 
+**Python (Backend):**
 ```bash
 pip install -r requirements.txt
 ```
 
-Or install individually:
+**Node.js (Frontend):**
 ```bash
-pip install requests python-dotenv spotipy boto3
+cd frontend
+npm install
 ```
+
+### 4. Docker (for Backend)
+
+- Install [Docker Desktop](https://www.docker.com/products/docker-desktop) for Windows/Mac/Linux
+- Make sure Docker daemon is running
 
 ## Setup
 
-1. **Clone or download this project**
+### 1. Clone or Download This Project
 
-2. **Create `.env` file from template:**
-   ```bash
-   copy .env.example .env
-   ```
+```bash
+git clone <repository-url>
+cd PythonLabAiAgent
+```
 
-3. **Add your credentials to `.env`:**
-   ```
-   # Spotify Credentials
-   SPOTIFY_CLIENT_ID=your_actual_client_id
-   SPOTIFY_CLIENT_SECRET=your_actual_client_secret
-   SPOTIFY_REDIRECT_URI=https://127.0.0.1:8888/callback
-   
-   # AWS Configuration (optional if using AWS CLI)
-   AWS_ACCESS_KEY_ID=your_aws_access_key
-   AWS_SECRET_ACCESS_KEY=your_aws_secret_key
-   AWS_REGION=us-east-1
-   ```
-   
-   **Note**: For playback features, the first run will open a browser for authorization. After authorizing, you'll be redirected to a 127.0.0.1 URL - just copy that full URL and paste it back in the terminal.
+### 2. Create `.env` File
 
-4. **Verify AWS Bedrock access:**
-   - Test with: `aws bedrock list-foundation-models --region us-east-1`
-   - Or just run the agent - it will check connectivity on startup
+Create a `.env` file in the root directory:
+
+```bash
+# Spotify Credentials
+SPOTIFY_CLIENT_ID=your_actual_client_id
+SPOTIFY_CLIENT_SECRET=your_actual_client_secret
+SPOTIFY_REDIRECT_URI=https://127.0.0.1:8888/callback
+
+# AWS Configuration (optional if using AWS CLI)
+AWS_ACCESS_KEY_ID=your_aws_access_key
+AWS_SECRET_ACCESS_KEY=your_aws_secret_key
+AWS_REGION=us-east-1
+```
+
+### 3. First-Time Spotify OAuth (Required for Playback Features)
+
+**⚠️ IMPORTANT**: Before running the web interface, you must authenticate Spotify once to generate the OAuth token:
+
+```bash
+python agent.py
+```
+
+When prompted, the script will:
+1. Open a browser for Spotify authorization
+2. Ask you to copy the redirect URL from your browser
+3. Generate a `.spotify_cache` file with your access token
+
+After the first run, the token will be cached and used by the Docker container.
+
+**Note**: This is single-user mode - playback controls affect your Spotify account only.
 
 ## Usage
 
-Run the agent orchestrator:
+### Option 1: Web Interface (Recommended)
+
+**Start Backend (FastAPI + Redis in Docker):**
+```bash
+docker-compose up
+```
+
+The backend will be available at:
+- API: `http://localhost:8000`
+- Health Check: `http://localhost:8000/health`
+- WebSocket: `ws://localhost:8000/ws/chat/{session_id}`
+
+**Start Frontend (Next.js):**
+```bash
+cd frontend
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+**Features:**
+- Real-time chat with WebSocket
+- Session persistence (stored in Redis)
+- Auto-reconnect on disconnect
+- Typing indicators
+- Beautiful UI with shadcn/ui components
+
+### Option 2: CLI Interface
+
+Run the agent directly in terminal:
 
 ```bash
 python agent.py

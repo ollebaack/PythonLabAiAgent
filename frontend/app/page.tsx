@@ -7,6 +7,8 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { cn } from "@/lib/utils";
 
 // WebSocket URL
 const WS_URL = "ws://localhost:8000/ws/chat";
@@ -258,37 +260,36 @@ export default function Home() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-linear-to-br from-zinc-50 to-zinc-100 dark:from-zinc-950 dark:to-black p-4">
+    <div className="flex min-h-screen items-center justify-center bg-background p-4">
       <Card className="w-full max-w-4xl h-[85vh] flex flex-col shadow-2xl overflow-hidden">
         {/* Header */}
-        <div className="border-b p-4 flex items-center justify-between bg-linear-to-r from-green-500 to-green-600 text-white rounded-t-lg shrink-0">
+        <div className="border-b p-4 flex items-center justify-between bg-primary-brand text-primary-brand-foreground rounded-t-lg shrink-0">
           <div className="flex items-center gap-3">
             <div className="text-2xl">🎵</div>
             <div>
               <h1 className="text-xl font-bold">Spotify Agent</h1>
-              <p className="text-sm text-green-50">
+              <p className="text-sm opacity-90">
                 Powered by AWS Bedrock & Claude
               </p>
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <ThemeToggle />
             <Button
               onClick={handleNewChat}
-              variant="outline"
+              variant="ghost"
               size="sm"
-              className="bg-white/10 hover:bg-white/20 text-white border-white/30"
+              className="bg-primary-brand-foreground/10 hover:bg-primary-brand-foreground/20 text-primary-brand-foreground border-primary-brand-foreground/30"
             >
               ✨ New Chat
             </Button>
             <Badge
-              variant={isConnected ? "default" : "destructive"}
-              className="bg-white/20"
+              variant={isConnected ? "connected" : "destructive"}
+              className={cn(!isConnected && "bg-destructive text-white")}
             >
               {isConnected ? "🟢 Connected" : "🔴 Disconnected"}
             </Badge>
-            <Badge variant="secondary" className="bg-yellow-500/90 text-white">
-              Single-user playback mode
-            </Badge>
+            <Badge variant="playback">Single-user playback mode</Badge>
           </div>
         </div>
 
@@ -297,7 +298,7 @@ export default function Home() {
           <ScrollArea className="h-full p-4">
             <div className="space-y-4">
               {messages.length === 0 && (
-                <div className="text-center text-zinc-500 py-8">
+                <div className="text-center text-muted-foreground py-8">
                   <p className="text-lg mb-2">👋 Welcome to Spotify Agent!</p>
                   <p className="text-sm">
                     Ask me to search for songs, play music, or control playback.
@@ -317,21 +318,23 @@ export default function Home() {
                   }`}
                 >
                   {message.role !== "user" && (
-                    <Avatar className="h-8 w-8 bg-green-500">
-                      <AvatarFallback className="bg-green-500 text-white text-xs">
+                    <Avatar className="h-8 w-8 bg-primary-brand">
+                      <AvatarFallback className="bg-primary-brand text-primary-brand-foreground text-xs">
                         🎵
                       </AvatarFallback>
                     </Avatar>
                   )}
 
                   <div
-                    className={`max-w-[70%] rounded-lg px-4 py-2 ${
-                      message.role === "user"
-                        ? "bg-green-500 text-white"
-                        : message.role === "system"
-                          ? "bg-red-100 text-red-800 border border-red-200"
-                          : "bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100"
-                    }`}
+                    className={cn(
+                      "max-w-[70%] rounded-lg px-4 py-2",
+                      message.role === "user" &&
+                        "bg-message-user text-message-user-foreground",
+                      message.role === "system" &&
+                        "bg-destructive/10 text-destructive border border-destructive/20",
+                      message.role === "assistant" &&
+                        "bg-message-assistant text-message-assistant-foreground",
+                    )}
                   >
                     <p className="text-sm whitespace-pre-wrap">
                       {message.content}
@@ -342,8 +345,8 @@ export default function Home() {
                   </div>
 
                   {message.role === "user" && (
-                    <Avatar className="h-8 w-8 bg-blue-500">
-                      <AvatarFallback className="bg-blue-500 text-white text-xs">
+                    <Avatar className="h-8 w-8 bg-message-user">
+                      <AvatarFallback className="bg-message-user text-message-user-foreground text-xs">
                         👤
                       </AvatarFallback>
                     </Avatar>
@@ -353,12 +356,12 @@ export default function Home() {
 
               {isThinking && (
                 <div className="flex gap-3 justify-start">
-                  <Avatar className="h-8 w-8 bg-green-500">
-                    <AvatarFallback className="bg-green-500 text-white text-xs">
+                  <Avatar className="h-8 w-8 bg-primary-brand">
+                    <AvatarFallback className="bg-primary-brand text-primary-brand-foreground text-xs">
                       🎵
                     </AvatarFallback>
                   </Avatar>
-                  <div className="bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100 rounded-lg px-4 py-2 max-w-[70%]">
+                  <div className="bg-message-assistant text-message-assistant-foreground rounded-lg px-4 py-2 max-w-[70%]">
                     {thinkingEvents.length === 0 ? (
                       <div className="flex gap-1">
                         <span className="animate-bounce">●</span>
@@ -370,7 +373,7 @@ export default function Home() {
                         {thinkingEvents.map((event) => (
                           <div key={event.id} className="text-xs">
                             {event.type === "agent_call" && (
-                              <div className="flex items-center gap-2 text-blue-600 dark:text-blue-400">
+                              <div className="flex items-center gap-2 text-chart-1">
                                 <span>🤖</span>
                                 <span className="font-medium">
                                   Delegating to{" "}
@@ -381,13 +384,13 @@ export default function Home() {
                               </div>
                             )}
                             {event.type === "tool_call" && (
-                              <div className="flex items-center gap-2 text-purple-600 dark:text-purple-400">
+                              <div className="flex items-center gap-2 text-chart-2">
                                 <span>🔧</span>
                                 <span className="font-medium">
                                   Using tool: {event.tool}
                                 </span>
                                 {event.args && (
-                                  <span className="text-zinc-500 truncate max-w-xs">
+                                  <span className="text-muted-foreground truncate max-w-xs">
                                     {JSON.stringify(event.args).substring(
                                       0,
                                       50,
@@ -397,7 +400,7 @@ export default function Home() {
                               </div>
                             )}
                             {event.type === "agent_result" && (
-                              <div className="flex items-center gap-2 text-green-600 dark:text-green-400">
+                              <div className="flex items-center gap-2 text-chart-3">
                                 <span>✓</span>
                                 <span className="font-medium">
                                   Agent completed
@@ -405,7 +408,7 @@ export default function Home() {
                               </div>
                             )}
                             {event.type === "tool_result" && (
-                              <div className="flex items-center gap-2 text-green-600 dark:text-green-400">
+                              <div className="flex items-center gap-2 text-chart-4">
                                 <span>✓</span>
                                 <span className="font-medium">
                                   Tool completed
@@ -431,7 +434,7 @@ export default function Home() {
         </div>
 
         {/* Input */}
-        <div className="border-t p-4 bg-zinc-50 dark:bg-zinc-900 rounded-b-lg shrink-0">
+        <div className="border-t p-4 bg-muted/30 rounded-b-lg shrink-0">
           <div className="flex gap-2">
             <Input
               value={input}
@@ -444,13 +447,13 @@ export default function Home() {
             <Button
               onClick={handleSend}
               disabled={!input.trim() || !isConnected}
-              className="bg-green-500 hover:bg-green-600"
+              className="bg-primary-brand hover:bg-primary-brand/90 text-primary-brand-foreground"
             >
               Send
             </Button>
           </div>
           {!isConnected && (
-            <p className="text-xs text-red-500 mt-2">
+            <p className="text-xs text-destructive mt-2">
               Disconnected. Make sure the backend is running (docker-compose up)
             </p>
           )}

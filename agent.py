@@ -79,6 +79,7 @@ class Agent:
         self.model = model
         self.tools: Dict[str, Tool] = {}
         self.memory: List[Dict[str, Any]] = []
+        self.event_callback: Optional[Callable[[str, Dict[str, Any]], None]] = None
         # Initialize AWS Bedrock client
         self.bedrock_runtime = boto3.client(
             service_name='bedrock-runtime',
@@ -92,6 +93,15 @@ class Agent:
         """Register a tool with this agent."""
         self.tools[tool.name] = tool
         print(f"[{self.name}] Added tool: {tool.name}")
+    
+    def set_event_callback(self, callback: Callable[[str, Dict[str, Any]], None]):
+        """Set callback function for streaming events during execution."""
+        self.event_callback = callback
+    
+    def _emit_event(self, event_type: str, data: Dict[str, Any]):
+        """Emit an event if callback is set."""
+        if self.event_callback:
+            self.event_callback(event_type, data)
     
     def execute(self, user_input: str, max_iterations: int = 10) -> str:
         """Execute agent with user input, handling tool calls in a loop."""
@@ -129,10 +139,31 @@ class Agent:
                             
                             print(f"[{self.name}] Calling tool: {tool_name} with args: {tool_args}")
                             
+                            # Emit tool call event
+                            is_agent_call = tool_name.startswith('call_')
+                            self._emit_event(
+                                "agent_call" if is_agent_call else "tool_call",
+                                {
+                                    "agent": self.name,
+                                    "tool": tool_name,
+                                    "args": tool_args
+                                }
+                            )
+                            
                             if tool_name in self.tools:
                                 result = self.tools[tool_name].execute(**tool_args)
                             else:
                                 result = f"Error: Tool {tool_name} not found"
+                            
+                            # Emit result event
+                            self._emit_event(
+                                "agent_result" if is_agent_call else "tool_result",
+                                {
+                                    "agent": self.name,
+                                    "tool": tool_name,
+                                    "result": result[:200] + "..." if len(result) > 200 else result
+                                }
+                            )
                             
                             # Add tool result to memory
                             self.memory.append({

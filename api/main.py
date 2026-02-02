@@ -292,6 +292,15 @@ async def chat(request: ChatRequest):
     return ChatResponse(response=response, session_id=session_id)
 
 
+@app.get("/messages/{session_id}")
+async def get_messages(session_id: str):
+    """
+    Get all messages for a session.
+    """
+    messages = await load_session(session_id)
+    return {"messages": messages, "session_id": session_id}
+
+
 @app.websocket("/ws/chat/{session_id}")
 async def websocket_chat(websocket: WebSocket, session_id: str):
     """
@@ -310,6 +319,32 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
         
         # Restore agent memory from session
         coordinator.memory = messages.copy()
+        
+        # Store event loop reference
+        loop = asyncio.get_event_loop()
+        
+        # Define event callback for streaming updates
+        async def event_callback(event_type: str, data: Dict):
+            """Send agent events to client in real-time."""
+            try:
+                await websocket.send_json({
+                    "type": event_type,
+                    **data
+                })
+            except Exception as e:
+                print(f"Error sending event: {e}")
+        
+        # Create a sync wrapper for the async callback
+        def sync_event_callback(event_type: str, data: Dict):
+            """Synchronous wrapper for event callback."""
+            try:
+                # Schedule the coroutine in the event loop
+                asyncio.run_coroutine_threadsafe(event_callback(event_type, data), loop)
+            except Exception as e:
+                print(f"Error in sync callback: {e}")
+        
+        # Set the event callback on coordinator
+        coordinator.set_event_callback(sync_event_callback)
         
         # Listen for messages from client
         while True:

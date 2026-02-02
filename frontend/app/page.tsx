@@ -72,12 +72,18 @@ export default function Home() {
           const data = await response.json();
           if (data.messages && data.messages.length > 0) {
             // Convert backend messages to UI message format
-            const loadedMessages: Message[] = data.messages.map((msg: any) => ({
-              id: crypto.randomUUID(),
-              role: msg.role || "assistant",
-              content: msg.content,
-              timestamp: new Date(msg.timestamp || Date.now()),
-            }));
+            const loadedMessages: Message[] = data.messages.map(
+              (msg: {
+                role?: string;
+                content: string;
+                timestamp?: string | number;
+              }) => ({
+                id: crypto.randomUUID(),
+                role: msg.role || "assistant",
+                content: msg.content,
+                timestamp: new Date(msg.timestamp || Date.now()),
+              }),
+            );
             setMessages(loadedMessages);
           }
         }
@@ -252,10 +258,10 @@ export default function Home() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-zinc-50 to-zinc-100 dark:from-zinc-950 dark:to-black p-4">
+    <div className="flex min-h-screen items-center justify-center bg-linear-to-br from-zinc-50 to-zinc-100 dark:from-zinc-950 dark:to-black p-4">
       <Card className="w-full max-w-4xl h-[85vh] flex flex-col shadow-2xl overflow-hidden">
         {/* Header */}
-        <div className="border-b p-4 flex items-center justify-between bg-gradient-to-r from-green-500 to-green-600 text-white rounded-t-lg flex-shrink-0">
+        <div className="border-b p-4 flex items-center justify-between bg-linear-to-r from-green-500 to-green-600 text-white rounded-t-lg shrink-0">
           <div className="flex items-center gap-3">
             <div className="text-2xl">🎵</div>
             <div>
@@ -425,7 +431,7 @@ export default function Home() {
         </div>
 
         {/* Input */}
-        <div className="border-t p-4 bg-zinc-50 dark:bg-zinc-900 rounded-b-lg flex-shrink-0">
+        <div className="border-t p-4 bg-zinc-50 dark:bg-zinc-900 rounded-b-lg shrink-0">
           <div className="flex gap-2">
             <Input
               value={input}

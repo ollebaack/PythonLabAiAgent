@@ -1,7 +1,7 @@
 """
 Spotify-Specialized Agent Orchestrator
 An agent system where agents have memory, tools, and can call each other.
-Uses Ollama for LLM inference and Spotify API for music operations.
+Uses AWS Bedrock for LLM inference and Spotify API for music operations.
 """
 
 import os
@@ -11,6 +11,10 @@ from typing import List, Dict, Any, Callable, Optional
 from dotenv import load_dotenv
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
+import boto3
+
+# Load environment variables at module level
+load_dotenv()
 
 
 # ==================== Core Classes ====================
@@ -69,13 +73,20 @@ class Tool:
 class Agent:
     """An agent with memory, tools, and the ability to call an LLM."""
     
-    def __init__(self, name: str, system_prompt: str, model: str = "llama3.2"):
+    def __init__(self, name: str, system_prompt: str, model: str = "eu.anthropic.claude-sonnet-4-20250514-v1:0"):
         self.name = name
         self.system_prompt = system_prompt
         self.model = model
         self.tools: Dict[str, Tool] = {}
         self.memory: List[Dict[str, Any]] = []
-        self.ollama_url = "http://localhost:11434/api/chat"
+        # Initialize AWS Bedrock client
+        self.bedrock_runtime = boto3.client(
+            service_name='bedrock-runtime',
+            region_name=os.getenv('AWS_REGION', 'us-east-1'),
+            aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
+            aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
+            aws_session_token=os.getenv('AWS_SESSION_TOKEN')
+        )
     
     def add_tool(self, tool: Tool):
         """Register a tool with this agent."""
@@ -97,21 +108,24 @@ class Agent:
             # Prepare tools schema
             tools_schema = [tool.to_schema() for tool in self.tools.values()] if self.tools else None
             
-            # Call Ollama with retry logic
+            # Call AWS Bedrock with retry logic
             max_retries = 2
             for attempt in range(max_retries):
                 try:
-                    response = self._call_ollama(messages, tools_schema)
+                    response = self._call_bedrock(messages, tools_schema)
                     
                     # Check if response contains tool calls
                     if response.get("message", {}).get("tool_calls"):
                         # Add assistant message with tool calls to memory
-                        self.memory.append(response["message"])
+                        assistant_msg = {"role": "assistant"}
+                        assistant_msg.update(response["message"])
+                        self.memory.append(assistant_msg)
                         
                         # Execute each tool call
-                        for tool_call in response["message"]["tool_calls"]:
+                        for idx, tool_call in enumerate(response["message"]["tool_calls"]):
                             tool_name = tool_call["function"]["name"]
                             tool_args = tool_call["function"]["arguments"]
+                            tool_call_id = tool_call.get("id", f"call_{idx}")
                             
                             print(f"[{self.name}] Calling tool: {tool_name} with args: {tool_args}")
                             
@@ -123,6 +137,7 @@ class Agent:
                             # Add tool result to memory
                             self.memory.append({
                                 "role": "tool",
+                                "tool_call_id": tool_call_id,
                                 "content": result
                             })
                         
@@ -171,20 +186,103 @@ class Agent:
         ]
         return any(hallucination_indicators)
     
-    def _call_ollama(self, messages: List[Dict], tools: Optional[List[Dict]] = None) -> Dict:
-        """Call Ollama API with OpenAI-compatible format."""
-        payload = {
-            "model": self.model,
-            "messages": messages,
-            "stream": False
+    def _call_bedrock(self, messages: List[Dict], tools: Optional[List[Dict]] = None) -> Dict:
+        """Call AWS Bedrock API with Claude model."""
+        # Convert messages to Claude format
+        system_message = None
+        claude_messages = []
+        
+        for msg in messages:
+            if not isinstance(msg, dict) or "role" not in msg:
+                continue
+            if msg["role"] == "system":
+                system_message = msg["content"]
+            elif msg["role"] == "tool":
+                # Tool results need to be in tool_result format
+                claude_messages.append({
+                    "role": "user",
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": msg.get("tool_call_id", "tool_" + str(len(claude_messages))),
+                        "content": msg["content"]
+                    }]
+                })
+            else:
+                # Handle assistant messages with tool calls
+                if msg.get("tool_calls"):
+                    tool_uses = []
+                    for tc in msg["tool_calls"]:
+                        tool_uses.append({
+                            "type": "tool_use",
+                            "id": tc.get("id", "tool_" + str(len(tool_uses))),
+                            "name": tc["function"]["name"],
+                            "input": tc["function"]["arguments"]
+                        })
+                    claude_messages.append({
+                        "role": "assistant",
+                        "content": tool_uses
+                    })
+                else:
+                    claude_messages.append({
+                        "role": msg["role"],
+                        "content": msg["content"]
+                    })
+        
+        # Build request body
+        body = {
+            "anthropic_version": "bedrock-2023-05-31",
+            "max_tokens": 4096,
+            "messages": claude_messages
         }
         
-        if tools:
-            payload["tools"] = tools
+        if system_message:
+            body["system"] = system_message
         
-        response = requests.post(self.ollama_url, json=payload)
-        response.raise_for_status()
-        return response.json()
+        if tools:
+            # Convert OpenAI tool format to Claude tool format
+            claude_tools = []
+            for tool in tools:
+                claude_tools.append({
+                    "name": tool["function"]["name"],
+                    "description": tool["function"]["description"],
+                    "input_schema": tool["function"]["parameters"]
+                })
+            body["tools"] = claude_tools
+        
+        # Call Bedrock
+        response = self.bedrock_runtime.invoke_model(
+            modelId=self.model,
+            body=json.dumps(body)
+        )
+        
+        response_body = json.loads(response['body'].read())
+        
+        # Convert Claude response to OpenAI-compatible format
+        result = {"message": {}}
+        
+        if response_body.get("stop_reason") == "tool_use":
+            # Extract tool calls
+            tool_calls = []
+            for content in response_body.get("content", []):
+                if content.get("type") == "tool_use":
+                    tool_calls.append({
+                        "id": content.get("id", "call_" + str(len(tool_calls))),
+                        "function": {
+                            "name": content["name"],
+                            "arguments": content["input"]
+                        }
+                    })
+            result["message"]["tool_calls"] = tool_calls
+            result["message"]["content"] = ""
+        else:
+            # Extract text response
+            content_text = ""
+            for content in response_body.get("content", []):
+                if content.get("type") == "text":
+                    content_text += content["text"]
+            result["message"]["content"] = content_text
+        
+        return result
 
 
 class SpotifyClient:
@@ -604,26 +702,83 @@ def create_playback_tools(playback_client: SpotifyPlaybackClient) -> List[Tool]:
 
 # ==================== Setup Validation ====================
 
-def check_ollama_connection(model: str = "llama3.2") -> bool:
-    """Check if Ollama is running and model is available."""
+def check_bedrock_connection(model: str = "eu.anthropic.claude-sonnet-4-20250514-v1:0") -> bool:
+    """Check if AWS Bedrock is accessible."""
     try:
-        print("   (This may take 10-30 seconds on first run while model loads...)")
-        response = requests.post(
-            "http://localhost:11434/api/chat",
-            json={
-                "model": model,
-                "messages": [{"role": "user", "content": "test"}],
-                "stream": False
-            },
-            timeout=60  # Increased timeout for initial model load
+        print("   (Checking AWS credentials and Bedrock access...)")
+        region = os.getenv('AWS_REGION', 'us-east-1')
+        bedrock_runtime = boto3.session.Session().client(
+            service_name='bedrock-runtime',
+            region_name=region,
+            aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
+            aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
+            aws_session_token=os.getenv('AWS_SESSION_TOKEN')
         )
-        return response.status_code == 200
+        
+        # Test connection with a simple request
+        response = bedrock_runtime.invoke_model(
+            modelId=model,
+            body=json.dumps({
+                "anthropic_version": "bedrock-2023-05-31",
+                "max_tokens": 10,
+                "messages": [{"role": "user", "content": "test"}]
+            })
+        )
+        return response['ResponseMetadata']['HTTPStatusCode'] == 200
     except Exception as e:
-        print(f"\n❌ Cannot connect to Ollama: {str(e)}")
+        error_str = str(e)
+        print(f"\n❌ Cannot connect to AWS Bedrock: {error_str}")
         print("\n📋 Setup Instructions:")
-        print("1. Install Ollama from https://ollama.ai")
-        print(f"2. Run: ollama pull {model}")
-        print("3. Ensure Ollama is running (it should start automatically)")
+        
+        if "Could not connect" in error_str or "Unable to locate credentials" in error_str:
+            print("\n🔑 AWS Credentials Not Found:")
+            print("   Option 1 - AWS CLI (Recommended):")
+            print("     1. Install AWS CLI: https://aws.amazon.com/cli/")
+            print("     2. Run: aws configure")
+            print("     3. Enter your Access Key ID and Secret Access Key")
+            print("\n   Option 2 - Environment Variables:")
+            print("     1. Create/edit .env file in this directory")
+            print("     2. Add these lines:")
+            print("        AWS_ACCESS_KEY_ID=your_key_here")
+            print("        AWS_SECRET_ACCESS_KEY=your_secret_here")
+            print(f"        AWS_REGION={region}")
+        elif "model identifier is invalid" in error_str.lower() or "validationexception" in error_str.lower():
+            print("\n🤖 Invalid Model Identifier:")
+            print(f"   - Current model: {model}")
+            print(f"   - Current region: {region}")
+            print("\n   The model may not be available in your region or you need to:")
+            print("   1. Go to AWS Bedrock console")
+            print("   2. Navigate to 'Model access' in the left menu")
+            print("   3. Click 'Manage model access' or 'Enable specific models'")
+            print("   4. Enable access to Anthropic Claude models")
+            print("\n   Common working model IDs:")
+            print("   - us-east-1: anthropic.claude-3-sonnet-20240229-v1:0")
+            print("   - us-west-2: anthropic.claude-3-sonnet-20240229-v1:0")
+            print("   - eu-west-1: anthropic.claude-3-sonnet-20240229-v1:0")
+            print("\n   You may need to wait a few minutes after enabling model access.")
+        elif "security token" in error_str.lower() or "invalid" in error_str.lower():
+            print("\n🔑 AWS Credentials Invalid:")
+            print("   - Your AWS credentials are set but invalid/expired")
+            print("   - Check your Access Key ID and Secret Access Key")
+            print("   - Verify credentials at: https://console.aws.amazon.com/iam/")
+        elif "AccessDeniedException" in error_str or "not authorized" in error_str.lower():
+            print("\n🚫 Permission Denied:")
+            print("   - Your AWS user/role lacks Bedrock permissions")
+            print("   - Required permission: bedrock:InvokeModel")
+            print("   - Contact your AWS administrator or add IAM policy")
+        elif "ResourceNotFoundException" in error_str:
+            print("\n🤖 Model Not Found:")
+            print("   - Claude model may not be available in your region")
+            print(f"   - Current region: {region}")
+            print("   - Enable model access: https://console.aws.amazon.com/bedrock/")
+            print("   - Go to 'Model access' and request Claude models")
+        else:
+            print("   1. Configure AWS credentials (aws configure)")
+            print(f"   2. Set AWS_REGION in .env file (current: {region})")
+            print("   3. Ensure you have access to Amazon Bedrock")
+            print("   4. Request model access in AWS Bedrock console")
+        
+        print("\n💡 For detailed setup: See README.md")
         return False
 
 
@@ -635,11 +790,11 @@ def main():
     print("🎵 Spotify Agent Orchestrator")
     print("=" * 60)
     
-    # Check Ollama connection
-    print("\n🔍 Checking Ollama connection...")
-    if not check_ollama_connection():
+    # Check AWS Bedrock connection
+    print("\n🔍 Checking AWS Bedrock connection...")
+    if not check_bedrock_connection():
         return
-    print("✅ Ollama is running!")
+    print("✅ AWS Bedrock is accessible!")
     
     # Initialize Spotify client
     print("\n🔍 Initializing Spotify client...")

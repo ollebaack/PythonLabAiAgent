@@ -8,7 +8,7 @@ A Python-based agent orchestration system where agents have individual memory, c
 - 🧠 **Memory**: Each agent maintains conversation history
 - 🔧 **Tools**: Extensible tool system with OpenAI function calling format
 - 🎵 **Spotify Integration**: Search tracks, get artist info, playlists, and recommendations
-- 🆓 **Free LLM**: Uses Ollama for local, free LLM inference
+- ☁️ **AWS Bedrock**: Uses Amazon Bedrock with Claude for powerful LLM inference
 
 ## Architecture
 
@@ -19,57 +19,65 @@ A Python-based agent orchestration system where agents have individual memory, c
 
 ## Prerequisites
 
-### 1. Install Ollama
+### 1. AWS Account & Bedrock Access
 
-#### Option A: Docker (Recommended)
+**Setup AWS Credentials:**
 
-**Prerequisites:**
-- Docker Desktop installed ([download here](https://www.docker.com/products/docker-desktop))
+1. **Create an AWS Account** (if you don't have one):
+   - Go to [AWS Console](https://aws.amazon.com/console/)
+   - Sign up for an AWS account
 
-**Setup (Windows PowerShell):**
-```powershell
-.\setup-ollama.ps1
-```
+2. **Enable Amazon Bedrock Access**:
+   - Navigate to Amazon Bedrock in AWS Console
+   - Request model access for Claude models (if not already enabled)
+   - Go to "Model access" and enable "Claude 3 Sonnet"
 
-**Setup (macOS/Linux):**
-```bash
-chmod +x setup-ollama.sh
-./setup-ollama.sh
-```
+3. **Configure AWS Credentials**:
 
-**Manual Docker Setup:**
-```bash
-# Start Ollama container
-docker-compose up -d
+   **Option A: AWS CLI (Recommended)**
+   ```bash
+   # Install AWS CLI
+   # Windows: Download from https://aws.amazon.com/cli/
+   # macOS: brew install awscli
+   # Linux: pip install awscli
+   
+   # Configure credentials
+   aws configure
+   ```
+   Enter your:
+   - AWS Access Key ID
+   - AWS Secret Access Key
+   - Default region (e.g., `us-east-1`)
+   - Output format (e.g., `json`)
 
-# Pull the model
-docker exec ollama ollama pull llama3.2
+   **Option B: Environment Variables**
+   Add to your `.env` file:
+   ```
+   AWS_ACCESS_KEY_ID=your_access_key
+   AWS_SECRET_ACCESS_KEY=your_secret_key
+   AWS_REGION=us-east-1
+   ```
 
-# Verify it's running
-docker logs ollama -f
-```
+   **Option C: IAM Role** (for EC2/ECS)
+   - Attach IAM role with Bedrock permissions to your instance
 
-**Useful Docker commands:**
-- View logs: `docker logs ollama -f`
-- Stop container: `docker-compose down`
-- List models: `docker exec ollama ollama list`
-- Pull other models: `docker exec ollama ollama pull llama3.1`
-
-Other recommended models:
-- `llama3.1` (larger, more capable)
-- `mistral` (fast alternative)
-- `phi3` (lightweight)
-
-#### Option B: Native Installation
-
-**Windows/macOS/Linux:**
-- Download from [https://ollama.ai](https://ollama.ai)
-- Install and start Ollama
-
-**Pull a model:**
-```bash
-ollama pull llama3.2
-```
+4. **Required IAM Permissions**:
+   Your AWS user/role needs:
+   ```json
+   {
+     "Version": "2012-10-17",
+     "Statement": [
+       {
+         "Effect": "Allow",
+         "Action": [
+           "bedrock:InvokeModel",
+           "bedrock:InvokeModelWithResponseStream"
+         ],
+         "Resource": "arn:aws:bedrock:*::foundation-model/anthropic.claude-*"
+       }
+     ]
+   }
+   ```
 
 ### 2. Get Spotify API Credentials
 
@@ -83,7 +91,12 @@ ollama pull llama3.2
 ### 3. Install Python Dependencies
 
 ```bash
-pip install requests python-dotenv spotipy
+pip install -r requirements.txt
+```
+
+Or install individually:
+```bash
+pip install requests python-dotenv spotipy boto3
 ```
 
 ## Setup
@@ -95,18 +108,24 @@ pip install requests python-dotenv spotipy
    copy .env.example .env
    ```
 
-3. **Add your Spotify credentials to `.env`:**
+3. **Add your credentials to `.env`:**
    ```
+   # Spotify Credentials
    SPOTIFY_CLIENT_ID=your_actual_client_id
    SPOTIFY_CLIENT_SECRET=your_actual_client_secret
    SPOTIFY_REDIRECT_URI=https://127.0.0.1:8888/callback
+   
+   # AWS Configuration (optional if using AWS CLI)
+   AWS_ACCESS_KEY_ID=your_aws_access_key
+   AWS_SECRET_ACCESS_KEY=your_aws_secret_key
+   AWS_REGION=us-east-1
    ```
    
    **Note**: For playback features, the first run will open a browser for authorization. After authorizing, you'll be redirected to a 127.0.0.1 URL - just copy that full URL and paste it back in the terminal.
 
-4. **Ensure Ollama is running:**
-   - Ollama usually starts automatically after installation
-   - Test with: `ollama list`
+4. **Verify AWS Bedrock access:**
+   - Test with: `aws bedrock list-foundation-models --region us-east-1`
+   - Or just run the agent - it will check connectivity on startup
 
 ## Usage
 
@@ -153,7 +172,7 @@ README.md          # This file
 1. **User Input**: You ask a question about Spotify
 2. **Coordinator**: Routes the request to appropriate specialized agent
 3. **Specialized Agent**: Uses tools to query Spotify API
-4. **LLM Processing**: Ollama processes the query and decides which tools to call
+4. **LLM Processing**: AWS Bedrock (Claude) processes the query and decides which tools to call
 5. **Tool Execution**: Spotify API calls are made via tools
 6. **Response**: Agent synthesizes the information and responds
 
@@ -196,15 +215,23 @@ custom_agent = Agent(
 Edit the `model` parameter when creating agents:
 
 ```python
-agent = Agent(name="Agent", system_prompt="...", model="mistral")
+agent = Agent(
+    name="Agent",
+    system_prompt="...",
+    model="anthropic.claude-3-sonnet-20240229-v1:0"  # Default
+    # or "anthropic.claude-3-haiku-20240307-v1:0"  # Faster, cheaper
+    # or "anthropic.claude-3-opus-20240229-v1:0"   # Most capable
+)
 ```
 
 ## Troubleshooting
 
-### "Cannot connect to Ollama"
-- Ensure Ollama is installed and running
-- Check if the model is downloaded: `ollama list`
-- Try pulling the model again: `ollama pull llama3.2`
+### "Cannot connect to AWS Bedrock"
+- Verify AWS credentials are configured: `aws sts get-caller-identity`
+- Check you have Bedrock access in your AWS region
+- Ensure model access is enabled in AWS Bedrock console
+- Verify IAM permissions include `bedrock:InvokeModel`
+- Try setting AWS_REGION in .env file explicitly
 
 ### "Failed to initialize Spotify"
 - Verify `.env` file exists and has correct credentials
@@ -212,15 +239,22 @@ agent = Agent(name="Agent", system_prompt="...", model="mistral")
 - Ensure no extra spaces in `.env` file
 
 ### Tool calls not working
-- Some models handle function calling better than others
-- Try `llama3.1` or `llama3.2` for best results
-- Check that Ollama is updated to the latest version
+- Claude models have excellent function calling support
+- Check AWS Bedrock console for any service issues
+- Verify you're using a supported Claude model version
+
+### AWS Cost Concerns
+- Claude 3 Haiku is the most cost-effective option (~$0.25 per million input tokens)
+- Claude 3 Sonnet offers good balance (~$3 per million input tokens)
+- Monitor usage in AWS Cost Explorer
+- Set up billing alerts in AWS Console
 
 ## Limitations
 
 - **Spotify Playback**: Client credentials flow doesn't support playback control (requires user OAuth)
 - **Rate Limits**: Spotify API has rate limits (typically sufficient for personal use)
-- **Local LLM**: Responses depend on the model's capabilities; larger models generally perform better
+- **AWS Costs**: AWS Bedrock is a paid service (but very affordable for personal use)
+- **AWS Regions**: Claude models may not be available in all AWS regions
 
 ## License
 
@@ -228,6 +262,8 @@ This project is provided as-is for educational and personal use.
 
 ## Resources
 
-- [Ollama Documentation](https://github.com/ollama/ollama)
+- [AWS Bedrock Documentation](https://docs.aws.amazon.com/bedrock/)
+- [Anthropic Claude Documentation](https://docs.anthropic.com/)
+- [Boto3 Documentation](https://boto3.amazonaws.com/v1/documentation/api/latest/index.html)
 - [Spotify Web API Documentation](https://developer.spotify.com/documentation/web-api)
 - [Spotipy Documentation](https://spotipy.readthedocs.io/)
